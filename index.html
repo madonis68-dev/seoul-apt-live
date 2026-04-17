@@ -14,7 +14,15 @@
       color: rgb(15 23 42);
       transition: background-color 0.3s ease, color 0.3s ease;
     }
+.stat-card {
+      padding: 1.25rem;           /* 모바일에서 여백 줄임 */
+    }
 
+    @media (min-width: 1024px) {
+      .stat-card {
+        padding: 2rem;
+      }
+    }
     /* ==================== 화이트 모드 ==================== */
     html:not(.dark) body {
       background: #e2e8f0;
