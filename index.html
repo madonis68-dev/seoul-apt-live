@@ -188,7 +188,7 @@
     <section class="search-wrap glass">
       <div class="search-icon">🔎</div>
       <input id="mainSearch" type="text" class="search-input" 
-             placeholder="아파트명 검색 (래미안, 자이, 등촌2, 신촌럭키...)">
+             placeholder="아파트 이름을 입력해보세요!">
       <div id="autocomplete" class="hidden"></div>
     </section>
 
@@ -261,70 +261,66 @@
   <script>
     let aptMap = new Map();
     let currentAptName = "";
-    let myChart = null;
-    let debounceTimer;
 
-    // 원본 스크립트 그대로 유지 (최적화만)
+    // smartMatch 함수
     function getSearchTokens(str) {
       let s = str.toLowerCase();
-      s = s.replace(/[,.\-]/g, ' ');
+      s = s.replace(/[,\\.\\-]/g, ' ');
       s = s.replace(/([가-힣a-z]+)([0-9]+)/g, '$1 $2');
       s = s.replace(/([0-9]+)([가-힣a-z]+)/g, '$1 $2');
-      s = s.replace(/[^가-힣a-z0-9\s]/g, ' ');
-      return s.split(/\s+/).filter(Boolean);
+      s = s.replace(/[^가-힣a-z0-9\\s]/g, ' ');
+      return s.split(/\\s+/).filter(Boolean);
     }
 
     function smartMatch(aptName, keyword) {
       if (!keyword?.trim()) return false;
       const cleanName = aptName.toLowerCase().replace(/[^가-힣a-z0-9]/g, '');
       const cleanKeyword = keyword.toLowerCase().replace(/[^가-힣a-z0-9]/g, '');
+
       if (cleanName.includes(cleanKeyword)) return true;
+
       const nameTokens = getSearchTokens(aptName);
       const keywordTokens = getSearchTokens(keyword);
-      return keywordTokens.every(t => nameTokens.includes(t));
-    }
+      if (keywordTokens.every(t => nameTokens.includes(t))) return true;
 
-    function formatPrice(p) {
-      const e = Math.floor(p / 10000);
-      return e ? `${e}억 ${Math.round(p % 10000 / 10000 * 100)}만` : `${p}만`;
-    }
-
-    function formatDateKorean(dateStr) {
-      const [year, month, day] = dateStr.split('-');
-      return `${year.slice(2)}년 ${parseInt(month)}월 ${parseInt(day)}일`;
+      return false;
     }
 
     async function loadData() {
-      try {
-        const res = await fetch('./apartment_data.json');
-        const rawData = await res.json();
-        aptMap.clear();
-        rawData.forEach(item => {
-          const name = (item.aptName || '').trim();
-          if (!name) return;
-          const deal = {
-            aptName: name, district: item.district || '',
-            dealDate: item.dealDate, area: parseFloat(item.area) || 0,
-            floor: item.floor || '', price: parseInt(item.price) || 0
-          };
-          if (!aptMap.has(name)) aptMap.set(name, []);
-          aptMap.get(name).push(deal);
-        });
-        updateSidebarInfo(rawData);
-        setupSearch();
-      } catch (e) {
-        console.error('데이터 로드 실패:', e);
-      }
+      const res = await fetch('./apartment_data.json');
+      const rawData = await res.json();
+
+      aptMap.clear();
+      rawData.forEach(item => {
+        const name = (item.aptName || '').trim();
+        if (!name) return;
+        const deal = {
+          aptName: name,
+          district: item.district || '',
+          dealDate: item.dealDate,
+          area: parseFloat(item.area) || 0,
+          floor: item.floor || '',
+          price: parseInt(item.price) || 0
+        };
+        if (!aptMap.has(name)) aptMap.set(name, []);
+        aptMap.get(name).push(deal);
+      });
+
+      updateSidebarInfo(rawData);
+      setupSearch();
     }
 
     function updateSidebarInfo(rawData) {
-      const info = document.getElementById('sidebarInfo');
-      if (!rawData?.length || !info) return;
+      if (!rawData.length) return;
       const dates = rawData.map(item => item.dealDate).sort();
       const periodText = `${dates[0].substring(0,4)}년 ${parseInt(dates[0].substring(5,7))}~${parseInt(dates[dates.length-1].substring(5,7))}월`;
-      info.innerHTML = `${periodText}<br><strong>${rawData.length.toLocaleString()}건</strong>`;
+      document.getElementById('sidebarInfo').innerHTML = `${periodText}<br>실거래가 <span class="font-semibold">${rawData.length.toLocaleString()}건</span>`;
     }
 
+    // 나머지 함수들 (setupSearch, selectApt, searchApt 등) 생략 없이 유지
+    // ... (당신이 기존에 쓰던 나머지 script 전체를 그대로 붙여넣으세요)
+    // 자동완성 + debounce + 알파벳 정렬
+    let debounceTimer;
     function setupSearch() {
       const input = document.getElementById('mainSearch');
       const dropdown = document.getElementById('autocomplete');
@@ -338,31 +334,41 @@
 
           let matches = [];
           for (const [name] of aptMap) {
-            if (smartMatch(name, keyword)) matches.push(name);
+            if (smartMatch(name, keyword)) {
+              matches.push(name);
+            }
           }
+
           if (matches.length === 0) return;
 
+          // 알파벳 순 정렬 + 거래 많은 순으로 보조 정렬
           matches.sort((a, b) => {
             const lenA = aptMap.get(a).length;
             const lenB = aptMap.get(b).length;
-            return lenB - lenA || a.localeCompare(b);
-          }).slice(0, 14);
+            if (lenA !== lenB) return lenB - lenA;
+            return a.localeCompare(b);
+          });
+
+          // 최대 14개만 표시
+          matches = matches.slice(0, 14);
 
           dropdown.innerHTML = matches.map(name => {
             const deals = aptMap.get(name);
-            const district = deals[0]?.district || '';
+            const district = deals[0].district || '';
             return `
-              <div onclick="selectApt('${name.replace(/'/g, "\\'")}')" 
-                   class="p-5 hover:bg-[rgba(37,99,235,0.08)] dark:hover:bg-slate-800 cursor-pointer border-b border-slate-100 last:border-b-0 flex justify-between items-center text-lg">
+              <div onclick="selectApt('${name}')" 
+                   class="dropdown-item px-7 py-5 hover:bg-blue-50 dark:hover:bg-slate-700 cursor-pointer text-lg border-b last:border-0 flex justify-between items-center">
                 <span>${name}</span>
-                <span class="text-xs px-3 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 rounded-full">${district}</span>
+                <span class="text-xs px-3 py-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 rounded-3xl">${district}</span>
               </div>
             `;
           }).join('');
+          
           dropdown.classList.remove('hidden');
-        }, 150);
+        }, 120);
       });
 
+      // Enter 키 검색
       input.addEventListener('keypress', e => {
         if (e.key === 'Enter') {
           const val = input.value.trim();
@@ -370,10 +376,9 @@
         }
       });
 
+      // 바깥 클릭 시 드롭다운 닫기
       document.addEventListener('click', e => {
-        if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-          dropdown.classList.add('hidden');
-        }
+        if (!input.contains(e.target) && !dropdown.contains(e.target)) dropdown.classList.add('hidden');
       });
     }
 
@@ -383,141 +388,207 @@
       searchApt(name);
     }
 
-    function searchApt(keyword) {
-      let deals = [];
-      for (const [name, list] of aptMap) {
-        if (smartMatch(name, keyword)) deals = deals.concat(list);
-      }
-      if (deals.length === 0) {
-        alert("해당 아파트 거래 내역을 찾을 수 없습니다.😢");
-        return;
-      }
+function searchApt(keyword) {
+  let deals = [];
+
+  for (const [name, list] of aptMap) {
+    if (smartMatch(name, keyword)) {
+      deals = deals.concat(list);
+    }
+  }
+
+  if (deals.length === 0) {
+    alert("해당 아파트 거래 내역을 찾을 수 없습니다.😢");
+    return;
+  }
+
+  currentAptName = deals[0].aptName;
+  renderResult(deals);
+
       currentAptName = deals[0].aptName;
       renderResult(deals);
       document.getElementById('searchResult').classList.remove('hidden');
-      document.getElementById('searchScreen').classList.add('hidden');
+
     }
 
     function renderResult(data) {
       const titleEl = document.getElementById('aptTitle');
       titleEl.textContent = data[0].aptName;
 
+      // 통계
       let total = 0, maxP = 0;
-      data.forEach(d => { total += d.price; if (d.price > maxP) maxP = d.price; });
-      const avg = Math.round(total / data.length);
+      data.forEach(d => {
+        total += d.price;
+        if (d.price > maxP) maxP = d.price;
+      });
 
+     const avg = Math.round(total / data.length);
       document.getElementById('aptAvgPrice').textContent = formatPrice(avg);
+
+      // 최근 거래일 → 한국식으로 변경
       const latest = [...data].sort((a,b) => new Date(b.dealDate) - new Date(a.dealDate))[0];
       document.getElementById('aptLatestDate').textContent = formatDateKorean(latest.dealDate);
-      document.getElementById('aptDealCount').textContent = data.length.toLocaleString() + "건";
-      document.getElementById('aptMaxPrice').textContent = formatPrice(maxP);
-      document.getElementById('dealCountBadge').textContent = `총 ${data.length.toLocaleString()}건`;
 
-      // 차트
+      document.getElementById('aptDealCount').textContent = data.length + "건";
+      document.getElementById('aptMaxPrice').textContent = formatPrice(maxP);
+         // 차트 (최근 30건)
       const sorted = [...data].sort((a,b) => new Date(a.dealDate) - new Date(b.dealDate)).slice(-30);
+      
       const ctx = document.getElementById('detailChart').getContext('2d');
-      if (myChart) myChart.destroy();
+      if (window.myChart) window.myChart.destroy();
 
       const isDark = document.documentElement.classList.contains('dark');
+
+      // 가격 범위 계산
       const prices = sorted.map(d => d.price);
-      const minPrice = Math.min(...prices), maxPrice = Math.max(...prices);
+      const minPrice = Math.min(...prices);
+      const maxPrice = Math.max(...prices);
+
       const suggestedMin = Math.floor(minPrice * 0.9 / 10000) * 10000;
       const suggestedMax = Math.ceil(maxPrice * 1.1 / 10000) * 10000;
 
-      myChart = new Chart(ctx, {
-        type: 'line', data: {
+      window.myChart = new Chart(ctx, {
+        type: 'line',
+        data: {
           labels: sorted.map(d => d.dealDate.slice(5)),
           datasets: [{
+            label: '실거래가',
             data: sorted.map(d => d.price),
-            borderColor: isDark ? '#60a5fa' : '#2563eb',
-            backgroundColor: isDark ? 'rgba(96,165,250,0.18)' : 'rgba(37,99,235,0.12)',
-            borderWidth: 4, tension: 0.4, pointRadius: 4,
-            pointHoverRadius: 6, fill: true,
-            pointBackgroundColor: isDark ? '#0f172a' : '#ffffff',
-            pointBorderColor: isDark ? '#60a5fa' : '#2563eb',
-            pointBorderWidth: 2
+            borderColor: '#3b82f6',
+            backgroundColor: isDark ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.12)',
+            borderWidth: 5,
+            tension: 0.4,
+            pointRadius: 4,
+            pointHoverRadius: 7,
+            pointBackgroundColor: isDark ? '#1e2937' : '#ffffff',
+            pointBorderColor: '#3b82f6',
+            pointBorderWidth: 2.5
           }]
-        }, options: {
-          responsive: true, maintainAspectRatio: false,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
           plugins: { 
             legend: { display: false },
             tooltip: {
-              backgroundColor: isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.98)',
-              titleColor: var(--text), bodyColor: var(--text),
-              bodyFont: { size: 14, weight: '600' },
-              callbacks: { label: ctx => ' ' + formatPrice(ctx.raw) }
+              backgroundColor: isDark ? 'rgba(15,23,42,0.97)' : 'rgba(255,255,255,0.98)',
+              titleColor: isDark ? '#e2e8f0' : '#1e2937',
+              bodyColor: isDark ? '#e2e8f0' : '#1e2937',
+              bodyFont: { size: 15, weight: '600' },
+              callbacks: {
+                label: (ctx) => ' ' + formatPrice(ctx.raw)
+              }
             }
           },
           scales: {
-            y: {
-              min: suggestedMin, max: suggestedMax,
-              grid: { color: isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.06)' },
-              ticks: {
-                color: isDark ? '#94a3b8' : '#64748b',
-                callback: v => {
-                  if (v >= 1e8) return (v/1e8)+'억';
-                  if (v >= 1e7) return Math.round(v/1e7)+'천만';
-                  return Math.round(v/1e4)+'만';
+            y: { 
+              min: suggestedMin,
+              max: suggestedMax,
+              grid: {
+                color: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(0,0,0,0.09)',
+                lineWidth: 1
+              },
+              ticks: { 
+                font: { size: 15, weight: '600' },
+                color: isDark ? '#e2e8f0' : '#0f172a',   // ← 화이트모드에서 완전 검정
+                callback: function(value) {
+                  if (value >= 100000000) return (value / 100000000) + '억';
+                  if (value >= 10000000) return Math.round(value / 10000000) + '천만';
+                  return Math.round(value / 10000) + '만';
                 }
               }
             },
             x: {
-              grid: { color: isDark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.05)' },
-              ticks: { color: isDark ? '#94a3b8' : '#64748b', maxRotation: 45 }
+              grid: {
+                color: isDark ? 'rgba(148,163,184,0.15)' : 'rgba(0,0,0,0.08)'
+              },
+              ticks: { 
+                font: { size: 13.5, weight: '500' },
+                color: isDark ? '#cbd5e1' : '#1e2937',   // ← 화이트모드에서 검정
+                maxRotation: 40,
+                minRotation: 40
+              }
             }
           }
         }
       });
-
-      // 테이블
+// 테이블 (최근 15건)
+      const tbody = document.getElementById('recentDeals');
       const recent = [...data].sort((a,b) => new Date(b.dealDate) - new Date(a.dealDate)).slice(0, 15);
-      document.getElementById('recentDeals').innerHTML = recent.map(d => `
-        <tr>
-          <td class="font-medium">${d.dealDate}</td>
-          <td>${d.area.toFixed(1)}㎡</td>
-          <td>${d.floor}층</td>
-          <td class="font-bold text-blue-600 dark:text-blue-400">${formatPrice(d.price)}</td>
+      
+      tbody.innerHTML = recent.map(d => `
+        <tr class="table-row">
+          <td class="px-8 py-6 font-medium">${d.dealDate}</td>
+          <td class="px-8 py-6">${d.area.toFixed(1)}㎡</td>
+          <td class="px-8 py-6">${d.floor}층</td>
+          <td class="px-8 py-6 text-right font-bold text-blue-600">${formatPrice(d.price)}</td>
         </tr>
       `).join('');
+
+      document.getElementById('dealCountBadge').textContent = recent.length + "건 표시";
+    }
+
+    function formatPrice(p) {
+      const e = Math.floor(p / 10000);
+      return e ? `${e}억 ${p % 10000}만` : `${p}만`;
+    }
+function formatDateKorean(dateStr) {
+      const [year, month, day] = dateStr.split('-');
+      return `${year.slice(2)}년 ${parseInt(month)}월 ${parseInt(day)}일`;
+    }
+function toggleDarkMode() {
+      document.documentElement.classList.toggle('dark');
+      const icon = document.getElementById('theme-icon');
+      icon.textContent = document.documentElement.classList.contains('dark') ? '🌙' : '☀️';
+
+      // 다크모드 토글 후 차트만 업데이트 (스크롤 움직이지 않게)
+      if (window.myChart && !document.getElementById('searchResult').classList.contains('hidden')) {
+        const currentInput = document.getElementById('mainSearch').value.trim();
+        if (currentInput) {
+          const deals = Array.from(aptMap.values()).flat().filter(d => d.aptName === currentAptName);
+          if (deals.length > 0) {
+            renderResult(deals);   // 스크롤 없이 다시 그리기
+          }
+        }
+      }
+    }
+
+    function showMain() {
+      document.getElementById('searchResult').classList.add('hidden');
+      document.getElementById('mainSearch').focus();
+      document.getElementById('mainSearch').value = '';
+    }
+
+    function showCompare() {
+      alert("🚀 단지 비교 기능은 곧 정식 업데이트됩니다!\\n\\n현재는 실거래 검색에 집중하고 있어요. 감사합니다! 👀");
+    }
+
+    // 시작
+    window.onload = loadData;
+
+    function formatPrice(p) {
+      const e = Math.floor(p / 10000);
+      return e ? `${e}억 ${p % 10000}만` : `${p}만`;
+    }
+
+    function formatDateKorean(dateStr) {
+      const [year, month, day] = dateStr.split('-');
+      return `${year.slice(2)}년 ${parseInt(month)}월 ${parseInt(day)}일`;
     }
 
     function toggleDarkMode() {
       document.documentElement.classList.toggle('dark');
-      const isDark = document.documentElement.classList.contains('dark');
-      document.getElementById('desktopTheme').textContent = isDark ? '🌙' : '☀️';
-      document.getElementById('mobileTheme').textContent = isDark ? '🌙' : '☀️';
-      if (myChart && !document.getElementById('searchResult').classList.contains('hidden')) {
-        const deals = Array.from(aptMap.values()).flat().filter(d => d.aptName === currentAptName);
-        if (deals.length) renderResult(deals);
-      }
-    }
-
-    function setActiveNav(mode) {
-      ['desktopMain','desktopCompare','mobileMain','mobileCompare'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.toggle('active', id.includes(mode));
-      });
+      const icon = document.getElementById('theme-icon');
+      icon.textContent = document.documentElement.classList.contains('dark') ? '🌙' : '☀️';
     }
 
     function showMain() {
-      document.getElementById('searchScreen').classList.remove('hidden');
       document.getElementById('searchResult').classList.add('hidden');
       document.getElementById('mainSearch').focus();
       document.getElementById('mainSearch').value = '';
-      if (myChart) myChart.destroy();
-      setActiveNav('Main');
     }
 
-    function showCompare() {
-      alert("🚀 단지 비교 기능은 곧 업데이트됩니다!\n\n현재 실거래 검색에 집중하고 있어요. 감사합니다! 👀");
-      setActiveNav('Compare');
-    }
-
-    // 초기화
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      document.documentElement.classList.add('dark');
-    }
-    window.addEventListener('load', loadData);
+    window.onload = loadData;
   </script>
 </body>
 </html>
